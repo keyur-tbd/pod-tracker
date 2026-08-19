@@ -1,0 +1,70 @@
+name: Refresh SKU POD dashboard
+
+# Times are UTC. 02:30 UTC = 08:00 IST.
+# GitHub queues scheduled runs and can start them late under load; treat the
+# time as "some time after", not "on the dot".
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:          # lets you run it by hand from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write the service account key
+        env:
+          SA: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/service_account.json"
+          python -c "import json,sys; json.load(open(sys.argv[1])); print('key parsed OK')" "$RUNNER_TEMP/service_account.json"
+
+      - name: Build the dashboard
+        env:
+          SKU_POD_SERVICE_ACCOUNT: ${{ runner.temp }}/service_account.json
+        run: |
+          mkdir -p public
+          python sku_pod_tracker.py \
+            --html public/index.html \
+            --xlsx public/sku_pod_tracker.xlsx
+          touch public/.nojekyll
+          printf 'User-agent: *\nDisallow: /\n' > public/robots.txt
+          ls -lh public
+
+      - uses: actions/configure-pages@v4
+
+      # GitHub's Pages docs currently reference v4 of this action while the
+      # action's own README shows v3. Both major tags exist; bump if Actions
+      # warns about deprecation.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
