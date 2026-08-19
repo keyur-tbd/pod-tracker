@@ -19,6 +19,10 @@ SERVICE_ACCOUNT_FILE = os.environ.get(
 #           https://docs.google.com/spreadsheets/d/1AbC...XyZ/edit#gid=0
 #                                                  ^^^^^^^^^^^ this
 MONTH_SOURCES = {
+    "April 2026": "1ekLOzViJTBzNHKK-6loEtEVf32V5twNyQG8ZOOX66sU",
+    "May 2026": "1LCr7HCuSWsg2eArAldBNYEV4bYF9sY3WmoJ7dFMLft0",
+    "June 2026": "1SUiaN3vK4ojP7Sa0Jt-fHb42T6dGnsBOyP-DzWJt8Qo",
+    "July 2026": "1qmEOE28gRg4O727xlequ4XuwodbIiAk5f2jSSEe3wV4",
     "August 2026": "1DLQEmPUC0tGWvfmuftXsxnj2d-p8ywQ79mdJQ2o9B14",
     # "September 2026": "PUT_SEPTEMBER_SHEET_ID_HERE",
 }
