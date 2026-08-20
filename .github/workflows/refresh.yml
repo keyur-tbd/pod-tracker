@@ -5,7 +5,9 @@ name: Refresh SKU POD dashboard
 # time as "some time after", not "on the dot".
 on:
   schedule:
-    - cron: "30 2 * * *"
+    # Every 3 hours at 30 minutes UTC
+    # Runs at: 9 AM, 12 PM, 3 PM, 6 PM, 9 PM, 12 AM, 3 AM, 6 AM IST
+    - cron: "15 */3 * * *"
   workflow_dispatch:          # lets you run it by hand from the Actions tab
 
 permissions:
