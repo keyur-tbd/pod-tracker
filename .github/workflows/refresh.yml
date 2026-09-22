@@ -70,3 +70,33 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # POD status/qty and the T1/T2 tier into Supabase (public.sku_pod_entry), for Birbal's
+  # Order to Cash report. Independent of the dashboard: a failure here never blocks the page.
+  # Months are found by sheet name; a month whose sheet has not changed since its last load
+  # is skipped, so a normal run reloads only the sheet the ops team is editing.
+  supabase:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-supabase.txt
+
+      - name: Write the service account key
+        env:
+          SA: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+        run: printf '%s' "$SA" > "$RUNNER_TEMP/service_account.json"
+
+      - name: Load the SKU POD sheets into Supabase
+        env:
+          SKU_POD_SERVICE_ACCOUNT: ${{ runner.temp }}/service_account.json
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PGSSLMODE: require
+        run: python pod_sheet_loader.py
