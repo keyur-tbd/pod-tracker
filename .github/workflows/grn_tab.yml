@@ -7,7 +7,9 @@ name: GRN tab of the SKU POD trackers
 # GitHub queues scheduled runs and can start them late under load.
 #
 # The service account must be shared on each month's tracker as EDITOR (the POD loader only needs
-# Viewer); a read-only tracker is reported in the log and skipped.
+# Viewer); a read-only tracker is reported in the log and skipped. The owner granted that to
+# sheets-loader@natural-system-459204-j9.iam.gserviceaccount.com (secret GRN_TAB_SERVICE_ACCOUNT, set
+# 2026-10-15); the dashboard / POD loader key (GOOGLE_SERVICE_ACCOUNT, podashboard@) is the fallback.
 
 on:
   schedule:
@@ -47,7 +49,7 @@ jobs:
 
       - name: Write the service account key
         env:
-          SA: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          SA: ${{ secrets.GRN_TAB_SERVICE_ACCOUNT || secrets.GOOGLE_SERVICE_ACCOUNT }}
         run: printf '%s' "$SA" > "$RUNNER_TEMP/service_account.json"
 
       - name: Rewrite the GRN DATA tabs

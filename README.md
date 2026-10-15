@@ -9,10 +9,11 @@ status). All three jobs use the same Google service account (`podashboard@…iam
 |---|---|---|---|
 | dashboard (`sku_pod_tracker.py`, `dashboard.py`, `config.py`) | `refresh.yml`, every 3 h | builds the SKU POD dashboard (GitHub Pages) | Viewer |
 | supabase (`pod_sheet_loader.py`) | `refresh.yml`, every 3 h | loads `SKU POD ENTRY` into `public.sku_pod_entry` for Birbal's Order to Cash report; replaces a month when its sheet changed | Viewer |
-| grn_tab (`grn_tab_writer.py`) | `grn_tab.yml`, daily 07:15 IST | rewrites the `GRN DATA` tab of the current + previous month's sheets from Supabase | **Editor** |
+| grn_tab (`grn_tab_writer.py`) | `grn_tab.yml`, daily 07:15 IST | rewrites the `GRN DATA` tab of the current + previous month's sheets from Supabase | **Editor** (granted to `sheets-loader@…`, secret `GRN_TAB_SERVICE_ACCOUNT`) |
 
-Secrets: `GOOGLE_SERVICE_ACCOUNT` (the key file's JSON), `SUPABASE_DB_URL` (session pooler host; runners are IPv4
-only, `PGSSLMODE=require`).
+Secrets: `GOOGLE_SERVICE_ACCOUNT` (podashboard@'s key JSON), `GRN_TAB_SERVICE_ACCOUNT` (sheets-loader@'s key JSON, the
+account the tracker owner shares as Editor; the grn_tab job falls back to `GOOGLE_SERVICE_ACCOUNT` when it is unset),
+`SUPABASE_DB_URL` (session pooler host; runners are IPv4 only, `PGSSLMODE=require`).
 
 ## GRN DATA tab (since 2026-10-14)
 

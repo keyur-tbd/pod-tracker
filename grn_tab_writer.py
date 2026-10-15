@@ -44,9 +44,10 @@ needs, one role higher).
     python grn_tab_writer.py --dry-run [--dump rows.json]             # query only
 
 Environment: SUPABASE_DB_URL (+ PGSSLMODE / SUPABASE_DB_SSLMODE, SUPABASE_DB_SSLROOTCERT),
-SKU_POD_SERVICE_ACCOUNT (service account key; the same the POD loader uses) or GRN_TAB_TOKEN_JSON (an OAuth
-token.json with the spreadsheets + drive.readonly scopes, used instead when set),
-GRN_TAB_LOOKBACK_DAYS (default 21), GRN_TAB_MONTHS_BACK (default 1).
+SKU_POD_SERVICE_ACCOUNT (service account key file -- the account the tracker owner shares as Editor: since
+2026-10-15 that is sheets-loader@natural-system-459204-j9.iam.gserviceaccount.com, secret GRN_TAB_SERVICE_ACCOUNT;
+the POD loader's podashboard@ key only reads) or GRN_TAB_TOKEN_JSON (an OAuth token.json with the spreadsheets +
+drive.readonly scopes, used instead when set), GRN_TAB_LOOKBACK_DAYS (default 21), GRN_TAB_MONTHS_BACK (default 1).
 """
 from __future__ import annotations
 
