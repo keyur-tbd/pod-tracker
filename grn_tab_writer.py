@@ -8,9 +8,10 @@ there and the sheet-side consolidation can be retired.
 
 What the tracker needs from the tab (its only readers are the "SKU POD ENTRY" formulas Auto GRN Qty, col P,
 and GRN Amt, col W):
-    A Part_1   partner PO number (Nature's Basket and Reliance stores: the GRN number instead -- their POs are
-               standing POs with many invoices, so a PO-level match would attribute receipts to the wrong
-               invoice; the tracker falls back to POD for those parties anyway)
+    A Part_1   partner PO number. The standing-PO parties (Nature's Basket, Reliance Signature / Smart, Metro C&C,
+               Milkbasket) get the GRN number instead: the same PO carries many invoices, so a PO-level match
+               would attribute another invoice's receipt -- the owner's rule (2026-10-15) is that these parties
+               match by invoice only; the tracker falls back to POD for them anyway
     B Part_2   our invoice number as the partner quotes it (blank where the feed has none: Zepto, Blinkit HOT,
                Amazon)
     C Part_3   the partner's item id (SKU code / ASIN / article / EAN / product no; Reliance: item description)
@@ -148,7 +149,7 @@ with raw as (
   union all
   -- Milkbasket GRN PDFs sometimes list another vendor's lines (Nutri Being / "Thf" products); the old
   -- consolidation kept Mimansa rows only, but the vendor name is blank or "Reliance Retail" on many of ours.
-  select 'milkbasket_grn', id, po_number, vendor_invoice_number, article, article, 'Milkbasket', grn_number, grn_date,
+  select 'milkbasket_grn', id, grn_number, vendor_invoice_number, article, article, 'Milkbasket', grn_number, grn_date,
          coalesce(accepted_qty, 0), 0, created_at::date
     from public.milkbasket_grn
    where coalesce(vendor_name, '') !~* '^nutri'
@@ -176,9 +177,10 @@ lines as (
    where coalesce(nullif(trim(po), ''), nullif(trim(inv), '')) is not null and nullif(trim(item), '') is not null
 ),
 keyed as (
-  -- one row per Part_1 x Part_2 x Part_3. Nature's Basket and Reliance carry the GRN number in Part_1, and a
-  -- store invoice is often received on two GRNs: those merge on invoice x item (the tracker's MATCH would
-  -- otherwise see only the first GRN), Part_1 listing the GRN numbers.
+  -- one row per Part_1 x Part_2 x Part_3. The standing-PO parties (Nature's Basket, Reliance stores + Metro C&C,
+  -- Milkbasket: the same PO carries many invoices, so the owner's rule is "match by invoice only") carry the GRN
+  -- number in Part_1, and an invoice is often received on two GRNs: those merge on invoice x item (the tracker's
+  -- MATCH would otherwise see only the first GRN), Part_1 listing the GRN numbers.
   select feed, string_agg(distinct po, ', ' order by po) as po, inv, item,
          sum(qty) as qty, sum(amt) as amt, max(grn_date) as grn_date, min(loaded) as loaded,
          max(coalesce(r.new_no, m.erp_item_no)) as erp_item_no
@@ -187,7 +189,7 @@ keyed as (
     left join warehouse.item_rename_map r on r.old_no = m.erp_item_no
    where l.dup_seq = 1
      and (%(since)s::date is null or coalesce(l.grn_date, l.loaded) >= %(since)s::date)
-   group by feed, case when feed in ('nb_grn', 'reliance_grn') and inv is not null then null else po end, inv, item
+   group by feed, case when feed in ('nb_grn', 'reliance_grn', 'milkbasket_grn') and inv is not null then null else po end, inv, item
 )
 select k.feed, k.po, k.inv, k.item, k.qty, k.amt, k.erp_item_no, i."Description" as erp_description, coalesce(k.grn_date, k.loaded) as ref_date
   from keyed k

@@ -21,7 +21,9 @@ Until then the ops team pasted the tab every day from a consolidation sheet ("gr
 GRN Google Sheets that the LlamaIndex schedulers write. Every feed also lands in Supabase (one table per partner,
 3-hourly), so `grn_tab_writer.py` writes the tab from there and the sheet-side consolidation is retired.
 
-* Layout is unchanged where the tracker reads it: `Part_1` (PO; Nature's Basket and Reliance stores: GRN number),
+* Layout is unchanged where the tracker reads it: `Part_1` (PO; the standing-PO parties Nature's Basket, Reliance
+  Signature / Smart, Metro C&C and Milkbasket get the GRN number instead, so they match by invoice only -- the same PO
+  carries many invoices),
   `Part_2` (our invoice number as the partner quotes it), `Part_3` (partner item id), `GRN Qty`, `GRN Amt`,
   `SKU Name` (the tab's own formula, re-written per row, with a fallback through the ERP description), `Source Sheet`
   (now the Supabase feed name). New reference columns: `ERP item`, `ERP description`, `Date`.
