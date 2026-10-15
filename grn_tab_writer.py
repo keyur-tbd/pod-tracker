@@ -57,10 +57,13 @@ import json
 import logging
 import os
 import re
+import socket
 import sys
 import time
 
+import httplib2
 import psycopg2
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -213,17 +216,31 @@ def credentials():
     return c, c.service_account_email
 
 
+HTTP_TIMEOUT = 600                               # a structural change on a 7 M-cell workbook makes Sheets recalculate
+                                                 # before it answers; the client library's default 60 s is not enough
+
+
+def service(name, version, creds):
+    return build(name, version, http=AuthorizedHttp(creds, http=httplib2.Http(timeout=HTTP_TIMEOUT)), cache_discovery=False)
+
+
 def call(req, what='request', attempts=6):
-    """Execute a Google API request, retrying the 5xx / 429 the Sheets API throws under load."""
+    """Execute a Google API request, retrying the 5xx / 429 the Sheets API throws under load and dropped
+    connections. Callers that are not idempotent (the grid trim) re-read the sheet before each attempt."""
     for i in range(attempts):
         try:
             return req.execute()
         except HttpError as e:
             if e.resp.status not in (429, 500, 502, 503, 504) or i == attempts - 1:
                 raise
-            wait = 5 * (2 ** i)
-            log.warning('%s: HTTP %s, retry in %ds', what, e.resp.status, wait)
-            time.sleep(wait)
+            why = 'HTTP %s' % e.resp.status
+        except (socket.timeout, TimeoutError, ConnectionError, httplib2.HttpLib2Error) as e:
+            if i == attempts - 1:
+                raise
+            why = type(e).__name__
+        wait = 5 * (2 ** i)
+        log.warning('%s: %s, retry in %ds', what, why, wait)
+        time.sleep(wait)
 
 
 def discover(drive):
@@ -377,14 +394,32 @@ def write_tab(svc, sid, rows, note):
     call(svc.spreadsheets().values().update(spreadsheetId=sid, range=f"'{TAB}'!{NOTE_COL}1", valueInputOption='RAW', body={'values': [[note]]}), 'note')
     reqs = [{'updateSheetProperties': {'properties': {'sheetId': gid, 'gridProperties': {'frozenRowCount': 1}}, 'fields': 'gridProperties.frozenRowCount'}},
             {'repeatCell': {'range': {'sheetId': gid, 'startRowIndex': 0, 'endRowIndex': 1}, 'cell': {'userEnteredFormat': {'textFormat': {'bold': True}}}, 'fields': 'userEnteredFormat.textFormat.bold'}}]
-    # give the freed rows back to the workbook (the sheet was near Google's cell ceiling)
-    if grid['rowCount'] > need_rows:
-        reqs.append({'deleteDimension': {'range': {'sheetId': gid, 'dimension': 'ROWS', 'startIndex': need_rows, 'endIndex': grid['rowCount']}}})
-    call(svc.spreadsheets().batchUpdate(spreadsheetId=sid, body={'requests': reqs}), 'format + trim')
+    call(svc.spreadsheets().batchUpdate(spreadsheetId=sid, body={'requests': reqs}), 'format')
+    trim_grid(svc, sid, gid, need_rows)
     # read back
     got = call(svc.spreadsheets().values().get(spreadsheetId=sid, range=f"'{TAB}'!A:A", majorDimension='COLUMNS'), 'verify').get('values', [[]])[0]
     if len(got) - 1 != len(rows):
         raise RuntimeError(f'wrote {len(rows)} rows but the tab now has {len(got) - 1}')
+
+
+def trim_grid(svc, sid, gid, need_rows, attempts=4):
+    """Give the rows below the data back to the workbook (it was at Google's cell ceiling). Not idempotent on a
+    dropped connection, so the row count is re-read before every attempt and nothing is deleted twice."""
+    for i in range(attempts):
+        meta = call(svc.spreadsheets().get(spreadsheetId=sid, fields='sheets(properties(sheetId,gridProperties(rowCount)))'), 'grid size')
+        row_count = next(s['properties']['gridProperties']['rowCount'] for s in meta['sheets'] if s['properties']['sheetId'] == gid)
+        if row_count <= need_rows:
+            return
+        try:
+            call(svc.spreadsheets().batchUpdate(spreadsheetId=sid, body={'requests': [
+                {'deleteDimension': {'range': {'sheetId': gid, 'dimension': 'ROWS', 'startIndex': need_rows, 'endIndex': row_count}}}]}), 'trim', attempts=1)
+            log.info('  grid trimmed from %d to %d rows', row_count, need_rows)
+            return
+        except (socket.timeout, TimeoutError, ConnectionError, httplib2.HttpLib2Error, HttpError) as e:
+            if i == attempts - 1:
+                raise
+            log.warning('trim: %s, checking the sheet and retrying', type(e).__name__)
+            time.sleep(10 * (i + 1))
 
 
 # ------------------------------------------------------------------ main
@@ -418,8 +453,8 @@ def main():
         months = [a.month.title()] if a.month else wanted_months(today, MONTHS_BACK)
         try:
             cr, who = credentials()
-            svc = build('sheets', 'v4', credentials=cr, cache_discovery=False)
-            found = discover(build('drive', 'v3', credentials=cr, cache_discovery=False))
+            svc = service('sheets', 'v4', cr)
+            found = discover(service('drive', 'v3', cr))
         except Exception as e:                                # noqa: BLE001
             if not a.dry_run:
                 raise
@@ -459,7 +494,7 @@ def main():
                 continue
             if svc is None:
                 cr, who = credentials()
-                svc = build('sheets', 'v4', credentials=cr, cache_discovery=False)
+                svc = service('sheets', 'v4', cr)
             try:
                 carry = [] if a.no_carry else read_carry(svc, sid)
                 if carry:
