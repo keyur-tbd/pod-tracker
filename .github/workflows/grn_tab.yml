@@ -1,0 +1,62 @@
+name: GRN tab of the SKU POD trackers
+
+# Rewrites the "GRN DATA" tab of the current and previous month's "<Month YYYY> - SKU POD MASTER TRACKER"
+# Google Sheets from Supabase (grn_tab_writer.py), replacing the daily hand paste from the "grnpy"
+# consolidation sheet (retired 2026-10-14). Times are UTC: 01:45 UTC = 07:15 IST, before the ops team
+# starts, and after the overnight GRN feed runs (~02:40-03:00 IST) have landed in Supabase.
+# GitHub queues scheduled runs and can start them late under load.
+#
+# The service account must be shared on each month's tracker as EDITOR (the POD loader only needs
+# Viewer); a read-only tracker is reported in the log and skipped.
+
+on:
+  schedule:
+    - cron: "45 1 * * *"
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 'only this tracker, e.g. "October 2026" (blank = current + previous month)'
+        default: ''
+      dry_run:
+        description: 'query Supabase and report the row counts, write nothing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# a late scheduled run must not overlap the next one (the tab is cleared and rewritten)
+concurrency:
+  group: grn-tab
+  cancel-in-progress: false
+
+jobs:
+  grn_tab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-supabase.txt
+
+      - name: Write the service account key
+        env:
+          SA: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+        run: printf '%s' "$SA" > "$RUNNER_TEMP/service_account.json"
+
+      - name: Rewrite the GRN DATA tabs
+        env:
+          SKU_POD_SERVICE_ACCOUNT: ${{ runner.temp }}/service_account.json
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PGSSLMODE: require
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.month }}" ]; then ARGS="$ARGS --month \"${{ github.event.inputs.month }}\""; fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          eval python grn_tab_writer.py $ARGS
