@@ -31,9 +31,9 @@ does; distinct GRNs for one PO x invoice x item are summed, as the old consolida
 
 Rows are limited to lines dated from LOOKBACK_DAYS before the tracker's month (a GRN cannot precede its
 invoice by much), so a month's tab carries ~60-100k rows instead of the 429k the full history had reached
--- the workbook was at 10.2 M cells. Rows whose Source is not one of the feeds below (today: the
-"FLIPKART QUICK" portal export, which has no Supabase feed yet) are carried over unchanged, so a manual paste
-for such a source survives the rewrite; pass --no-carry to drop them.
+-- the workbook was at 10.2 M cells. Rows whose Source is not one of the feeds below are carried over unchanged,
+so a manual paste for such a source survives the rewrite; pass --no-carry to drop them. (The "FLIPKART QUICK"
+portal export was the one such source until 2026-10-16; it is now the flipkart_quick_grn feed.)
 
 Which sheets: every tracker the account can edit for the current month and MONTHS_BACK months before it
 (default 1: the ops team keeps editing the previous month as late PODs arrive). A tracker the account can only
@@ -88,7 +88,8 @@ IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 
 # Source names the hand-pasted tab used for the feeds below; rows with these are ours and are replaced.
 LEGACY_SOURCES = {'Sheet1', 'hotgrn', 'instamartgrn', 'nbgrn', 'hyperpuregrn', 'Amazon', 'bbalertgrn', 'mraws',
-                  'reliancegrn', 'mbgrn', 'mrgrn', 'bbalertgrn_2', 'mrdonot', 'zeptogrn', 'amazon', 'nb'}
+                  'reliancegrn', 'mbgrn', 'mrgrn', 'bbalertgrn_2', 'mrdonot', 'zeptogrn', 'amazon', 'nb',
+                  'FLIPKART QUICK'}                # hand paste of the Flipkart Minutes portal export, in Supabase since 2026-10-16
 
 # One arm per feed. Column choices were checked against the hand-built tab on 2026-10-14 (60 random keys per
 # feed: qty and amount reproduced for every feed that carries them). `code` is what Birbal's item map is keyed
@@ -170,6 +171,12 @@ with raw as (
   select 'slveggies_grn', id, po_number, invoice_number, fsn_number, fsn_number, 'Flipkart', bill_number, bill_date,
          coalesce(grn_quantity, received_quantity, 0), coalesce(amount, 0), created_at::date
     from public.slveggies_grn
+  union all
+  -- Flipkart Minutes seller-portal PO report (FLIPKART QUICK tab of the Amazon workbook, sheet_grn_loader since
+  -- 2026-10-16). Columns as the hand paste had them: PO ID, FSN, Received Quantity, Total Amount (the PO line value).
+  select 'flipkart_quick_grn', id, po_id, null, product_id, product_id, 'Flipkart Quick', null, order_date,
+         coalesce(received_quantity, 0), coalesce(total_amount, 0), created_at::date
+    from public.flipkart_quick_grn
 ),
 lines as (
   select feed, id, nullif(trim(po), '') as po, nullif(trim(inv), '') as inv, trim(item) as item, code, map_platform, grn_no, grn_date, qty, amt, loaded,
@@ -200,7 +207,8 @@ select k.feed, k.po, k.inv, k.item, k.qty, k.amt, k.erp_item_no, i."Description"
 """
 
 MANAGED_FEEDS = ['zepto_grn', 'amazon_grn', 'hot_grn', 'hyperpure_grn', 'instamart_grn', 'nb_grn', 'bb_alert_grn', 'bb_net_grn',
-                 'mraws_grn', 'mrgrn_grn', 'reliance_grn', 'milkbasket_grn', 'flipkart_cb_grn', 'flipkart_ppr_grn', 'fatema_grn', 'slveggies_grn']
+                 'mraws_grn', 'mrgrn_grn', 'reliance_grn', 'milkbasket_grn', 'flipkart_cb_grn', 'flipkart_ppr_grn', 'fatema_grn', 'slveggies_grn',
+                 'flipkart_quick_grn']
 
 
 # ------------------------------------------------------------------ google
