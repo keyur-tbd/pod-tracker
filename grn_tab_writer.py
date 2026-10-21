@@ -13,15 +13,17 @@ and GRN Amt, col W):
                Smart, Metro C&C, Milkbasket) the same PO carries many invoices, so the fallback can only pick one
                of that PO's receipts -- the receipts that quote no invoice are written first so that it finds
                those. (The old paste had the GRN number here for Nature's Basket.)
-    B Part_2   our invoice number as the partner quotes it (blank where the feed has none: Zepto, Blinkit HOT,
-               Amazon)
+    B Part_2   our invoice number: as the order-to-cash bridge resolved it where the bridge matched on the invoice
+               number (since 2026-10-21), else as the partner quotes it (blank where the feed has none: Zepto,
+               Blinkit HOT, Amazon, Flipkart Minutes)
     C Part_3   the partner's item id (SKU code / ASIN / article / EAN / product no; Reliance: item description)
                -- the tab's own SKU Name formula maps it to the ERP name through DATA VALIDATION L:N
     D GRN Qty  accepted / received quantity, summed per (Part_1, Part_2, Part_3)
     E GRN Amt  the feed's line value where it carries one, else 0 (Nature's Basket, Reliance, Milkbasket: 0,
                as before)
-    F SKU Name the tracker's own formula, re-written per row (falls back to the ERP description in col I
-               through DATA VALIDATION E:F when the partner id is not in the item list)
+    F SKU Name the tracker's own lookup, re-written per row: the ERP description in col I through DATA
+               VALIDATION E:F (the same lookup SKU POD ENTRY's Parent Description makes), falling back to the
+               partner id through L:N / M:N for a line Birbal's item map does not know (order swapped 2026-10-21)
     G Source   the Supabase feed (zepto_grn, hot_grn, instamart_grn, ...)
     H, I, J    ERP item no + description (Birbal's item map) and the date (GRN date; Zepto: PO date; else the
                day the line was loaded) -- new, for reference only
@@ -178,11 +180,24 @@ with raw as (
          coalesce(received_quantity, 0), coalesce(total_amount, 0), created_at::date
     from public.flipkart_quick_grn
 ),
+-- Part_2 is our invoice number as the order-to-cash bridge resolved it, where the bridge matched on the invoice
+-- number itself: partners quote it their own way (Nature's Basket "9222" for 27BLR-09222, Hyperpure "02420",
+-- "26KOL-02680" for 27KOL-02680, "27BLR -08774"), and the tracker matches Part_2 to the invoice exactly. Without
+-- it the tracker falls back to the PO, which for a standing PO finds the first receipt of ANOTHER invoice
+-- (2026-10-21: 27BLR-09222 read 1 of 2 Pav). PO-only matches keep the partner's text: the PO fallback handles them.
+resolved as (
+  select distinct on (feed, grn_row_id) feed, grn_row_id, invoice_no
+    from public.o2c_grn_matched
+   where invoice_no is not null and match_method in ('invoice_exact', 'invoice_core', 'invoice_core+po')
+   order by feed, grn_row_id, invoice_no
+),
 lines as (
-  select feed, id, nullif(trim(po), '') as po, nullif(trim(inv), '') as inv, trim(item) as item, code, map_platform, grn_no, grn_date, qty, amt, loaded,
-         row_number() over (partition by feed, po, inv, grn_no, item, grn_date, qty order by id) as dup_seq
-    from raw
-   where coalesce(nullif(trim(po), ''), nullif(trim(inv), '')) is not null and nullif(trim(item), '') is not null
+  select r.feed, r.id, nullif(trim(r.po), '') as po, coalesce(v.invoice_no, nullif(trim(r.inv), '')) as inv, trim(r.item) as item, r.code, r.map_platform,
+         r.grn_no, r.grn_date, r.qty, r.amt, r.loaded,
+         row_number() over (partition by r.feed, r.po, r.inv, r.grn_no, r.item, r.grn_date, r.qty order by r.id) as dup_seq
+    from raw r
+    left join resolved v on v.feed = r.feed and v.grn_row_id = r.id
+   where coalesce(nullif(trim(r.po), ''), nullif(trim(r.inv), '')) is not null and nullif(trim(r.item), '') is not null
 ),
 keyed as (
   -- one row per Part_1 (PO) x Part_2 (invoice) x Part_3 (item), the key the old consolidation used; an invoice
@@ -341,9 +356,15 @@ def num(v):
 
 
 def sku_formula(row):
+    """SKU Name = the ERP description through DATA VALIDATION E:F first -- the very lookup SKU POD ENTRY's Parent
+    Description (col K) makes from the billed item's description, so the two sides of the tracker's match agree.
+    Only an unmapped line falls back to the partner id (L, then M -> N). Partner id first, as until 2026-10-21, let
+    the ops-kept L:N list decide, and it disagreed with E:F (Flipkart Grissini FSN -> "GRISSINI CHILLI GARLIC
+    BREADSTICKS", Metro's OCR'd "Tbd Bnana WInt Cake ... 8906076131513" -> "BANANA CAKE 150G"), so a received line
+    read GRN 0. A blank col I goes straight to the fallback (XLOOKUP("") would match an empty E cell, not fail)."""
     r = row
-    return ("=IFERROR(IFERROR(XLOOKUP(C{r},'DATA VALIDATION'!L:L,'DATA VALIDATION'!N:N),XLOOKUP(C{r},'DATA VALIDATION'!M:M,'DATA VALIDATION'!N:N)),"
-            "IFERROR(XLOOKUP(I{r},'DATA VALIDATION'!E:E,'DATA VALIDATION'!F:F),\"\"))").format(r=r)
+    return ("=IFERROR(IF(I{r}=\"\",NA(),XLOOKUP(I{r},'DATA VALIDATION'!E:E,'DATA VALIDATION'!F:F)),"
+            "IFERROR(XLOOKUP(C{r},'DATA VALIDATION'!L:L,'DATA VALIDATION'!N:N),IFERROR(XLOOKUP(C{r},'DATA VALIDATION'!M:M,'DATA VALIDATION'!N:N),\"\")))").format(r=r)
 
 
 def build_rows(db_rows):
