@@ -2,9 +2,11 @@ name: GRN tab of the SKU POD trackers
 
 # Rewrites the "GRN DATA" tab of the current and previous month's "<Month YYYY> - SKU POD MASTER TRACKER"
 # Google Sheets from Supabase (grn_tab_writer.py), replacing the daily hand paste from the "grnpy"
-# consolidation sheet (retired 2026-10-14). Times are UTC: 01:45 UTC = 07:15 IST, before the ops team
-# starts, and after the overnight GRN feed runs (~02:40-03:00 IST) have landed in Supabase.
-# GitHub queues scheduled runs and can start them late under load.
+# consolidation sheet (retired 2026-10-14).
+#
+# STARTED BY SUPABASE since 2026-10-28: pg_cron job grn-tab-dispatch sends a workflow_dispatch at 08:00 and
+# 18:00 IST (pg_cron_grn_tab_dispatch.sql; log in public.grn_tab_dispatch_log). The schedule below is only a
+# fallback: GitHub started it 4.5-6 h late every day (01:45 UTC = 07:15 IST asked, 11:45-13:05 IST ran).
 #
 # The service account must be shared on each month's tracker as EDITOR (the POD loader only needs
 # Viewer); a read-only tracker is reported in the log and skipped. The owner granted that to
