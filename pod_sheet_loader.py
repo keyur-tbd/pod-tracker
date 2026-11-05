@@ -36,6 +36,7 @@ TAB = 'SKU POD ENTRY'
 HEADER_ROW = 2                       # row 1 is the merged Auto/Manual banner
 NAME_RE = re.compile(r'^\s*([A-Za-z]+ 20\d\d)\s*-\s*SKU POD MASTER TRACKER\s*$', re.I)
 TABLE = 'public.sku_pod_entry'
+READ_ROWS = 10000                    # about 6 MB a read at today's 620 bytes a row
 
 # sheet header -> (column, type). Headers not listed land only in raw_data.
 COLUMNS = {
@@ -131,14 +132,28 @@ def text(v):
 CONVERT = {'text': text, 'numeric': number, 'date': serial_date}
 
 
-def read_month(sheets, sheet_id):
+def with_retry(call):
     for attempt in range(4):
         try:
-            return sheets.spreadsheets().values().get(spreadsheetId=sheet_id, range=f"'{TAB}'",
-                                                      valueRenderOption='UNFORMATTED_VALUE').execute().get('values', [])
+            return call()
         except Exception as e:                                       # noqa: BLE001
             if attempt == 3: raise
             log.warning('read failed (%s), retrying', str(e)[:80]); time.sleep(5 * (attempt + 1))
+
+
+def read_month(sheets, sheet_id):
+    """The whole tab, in READ_ROWS pieces: httplib2 refuses a response over 10 MiB that expands more than 100x,
+    which a new month's tracker does in one read (67k pre-filled rows, 164x on 30 Sep, 180x on 30 Oct)."""
+    meta = with_retry(lambda: sheets.spreadsheets().get(spreadsheetId=sheet_id,
+                                                        fields='sheets.properties(title,gridProperties.rowCount)').execute())
+    row_count = next(s['properties']['gridProperties']['rowCount'] for s in meta['sheets'] if s['properties']['title'] == TAB)
+    values = []
+    for first in range(1, row_count + 1, READ_ROWS):
+        last = min(first + READ_ROWS - 1, row_count)
+        piece = with_retry(lambda: sheets.spreadsheets().values().get(spreadsheetId=sheet_id, range=f"'{TAB}'!{first}:{last}",
+                                                                      valueRenderOption='UNFORMATTED_VALUE').execute()).get('values', [])
+        values += piece + [[]] * (last - first + 1 - len(piece))     # blank rows at the end of a piece are not returned
+    return values
 
 
 def rows_for(label, sheet_id, values):
@@ -177,7 +192,12 @@ def main():
     if conn:
         with conn.cursor() as cur:
             cur.execute("set statement_timeout = '1800000'")
-            cur.execute(DDL)
+            # the ALTERs need an exclusive lock, so running them every load can queue behind a long reader of the
+            # table and hold up everything else reading it (5 Nov 2026: 30 min, then the job timed out)
+            cur.execute("""select 1 from information_schema.columns
+                            where table_schema = 'public' and table_name = 'sku_pod_entry' and column_name = 'sheet_modified'""")
+            if cur.fetchone() is None:
+                cur.execute(DDL)
         conn.commit()
     loaded = {}
     if conn:
